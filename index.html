@@ -51,13 +51,13 @@
 <script>
 // --- Configuration & Default State ---
 const DEFAULT_TIMELINE = [
-    { id: 'c-pro', name: "Constructive", speaker: "1st Speaker (Pro)", seconds: 180, side: 'pro' },
-    { id: 'c-con', name: "Constructive", speaker: "1st Speaker (Con)", seconds: 180, side: 'con' },
-    { id: 'r-pro', name: "Rebuttal", speaker: "2nd Speaker (Pro)", seconds: 180, side: 'pro' },
-    { id: 'r-con', name: "Rebuttal", speaker: "2nd Speaker (Con)", seconds: 180, side: 'con' },
-    { id: 'cf',    name: "Crossfire", speaker: "All Speakers", seconds: 180, side: 'all' }, // Set base time for both sides
-    { id: 's-pro', name: "Summary", speaker: "3rd Speaker (Pro)", seconds: 180, side: 'pro' },
-    { id: 's-con', name: "Summary", speaker: "3rd Speaker (Con)", seconds: 180, side: 'con' }
+    { id: 'c-prop', name: "Constructive", speaker: "1st Speaker (Prop)", seconds: 180, side: 'prop' },
+    { id: 'c-opp', name: "Constructive", speaker: "1st Speaker (Opp)", seconds: 180, side: 'opp' },
+    { id: 'r-prop', name: "Rebuttal", speaker: "2nd Speaker (Prop)", seconds: 180, side: 'prop' },
+    { id: 'r-opp', name: "Rebuttal", speaker: "2nd Speaker (Opp)", seconds: 180, side: 'opp' },
+    { id: 'cf',     name: "Crossfire", speaker: "All Speakers", seconds: 240, side: 'all' }, // 4 min dual-timer
+    { id: 's-opp',  name: "Summary", speaker: "3rd Speaker (Opp)", seconds: 180, side: 'opp' }, // Opp goes first in Summary
+    { id: 's-prop', name: "Summary", speaker: "3rd Speaker (Prop)", seconds: 180, side: 'prop' } // Prop closes
 ];
 
 let state = {
@@ -69,7 +69,7 @@ let state = {
     secondaryIsRunning: false,
     isDone: false,
     secondaryIsDone: false,
-    motions: { pro: '', con: '' }
+    motions: { prop: '', opp: '' }
 };
 
 const isStageMode = new URLSearchParams(window.location.search).has('stage');
@@ -239,7 +239,6 @@ function buildStageHTML() {
     const current = state.timeline[state.currentIndex];
     const isCrossfire = current.side === 'all';
     
-    // Warning state handles both timers in Crossfire
     const isWarning = isCrossfire 
         ? ((state.remaining <= 30 && state.remaining > 0) || (state.secondaryRemaining <= 30 && state.secondaryRemaining > 0))
         : (state.remaining <= 30 && state.remaining > 0);
@@ -247,18 +246,17 @@ function buildStageHTML() {
     let glowClass = ''; 
     if (state.isDone && (!isCrossfire || state.secondaryIsDone)) glowClass = 'shadow-none border-slate-900 bg-slate-950/50 text-slate-600';
     else if (isWarning) glowClass = 'stage-warning bg-slate-900/80 border-red-500';
-    else if (current.side === 'pro') glowClass = 'shadow-[0_0_120px_rgba(59,130,246,0.35)] border-blue-500 bg-slate-900/80';
-    else if (current.side === 'con') glowClass = 'shadow-[0_0_120px_rgba(239,68,68,0.35)] border-red-500 bg-slate-900/80';
+    else if (current.side === 'prop') glowClass = 'shadow-[0_0_120px_rgba(59,130,246,0.35)] border-blue-500 bg-slate-900/80';
+    else if (current.side === 'opp') glowClass = 'shadow-[0_0_120px_rgba(239,68,68,0.35)] border-red-500 bg-slate-900/80';
     else glowClass = 'crossfire-glow bg-slate-900/80';
 
-    // Speaker Styling & Halo
     let speakerColorClass = '';
     let speakerHaloClass = '';
     
-    if (current.side === 'pro') {
+    if (current.side === 'prop') {
         speakerColorClass = 'text-blue-400';
         speakerHaloClass = 'drop-shadow-[0_0_20px_rgba(96,165,250,0.8)]';
-    } else if (current.side === 'con') {
+    } else if (current.side === 'opp') {
         speakerColorClass = 'text-red-400';
         speakerHaloClass = 'drop-shadow-[0_0_20px_rgba(248,113,113,0.8)]';
     } else {
@@ -267,14 +265,14 @@ function buildStageHTML() {
     }
 
     let motionHtml = '';
-    if (current.side === 'pro' && state.motions.pro.trim() !== '') {
-        motionHtml = `<div class="text-xl text-blue-200 mt-4 max-w-4xl text-center font-medium"><span class="opacity-50 uppercase tracking-widest text-xs block mb-2 font-bold text-slate-300">Motion (Pro)</span> ${state.motions.pro}</div>`;
-    } else if (current.side === 'con' && state.motions.con.trim() !== '') {
-        motionHtml = `<div class="text-xl text-red-200 mt-4 max-w-4xl text-center font-medium"><span class="opacity-50 uppercase tracking-widest text-xs block mb-2 font-bold text-slate-300">Motion (Con)</span> ${state.motions.con}</div>`;
+    if (current.side === 'prop' && state.motions.prop.trim() !== '') {
+        motionHtml = `<div class="text-xl text-blue-200 mt-4 max-w-4xl text-center font-medium"><span class="opacity-50 uppercase tracking-widest text-xs block mb-2 font-bold text-slate-300">Motion (Prop)</span> ${state.motions.prop}</div>`;
+    } else if (current.side === 'opp' && state.motions.opp.trim() !== '') {
+        motionHtml = `<div class="text-xl text-red-200 mt-4 max-w-4xl text-center font-medium"><span class="opacity-50 uppercase tracking-widest text-xs block mb-2 font-bold text-slate-300">Motion (Opp)</span> ${state.motions.opp}</div>`;
     } else if (current.side === 'all') {
         let allMotions = [];
-        if (state.motions.pro.trim() !== '') allMotions.push(`<div class="flex-1"><span class="opacity-50 uppercase tracking-widest text-xs block mb-2 font-bold text-blue-300">Pro</span><span class="text-blue-100">${state.motions.pro}</span></div>`);
-        if (state.motions.con.trim() !== '') allMotions.push(`<div class="flex-1 border-l border-slate-700 pl-8"><span class="opacity-50 uppercase tracking-widest text-xs block mb-2 font-bold text-red-300">Con</span><span class="text-red-100">${state.motions.con}</span></div>`);
+        if (state.motions.prop.trim() !== '') allMotions.push(`<div class="flex-1"><span class="opacity-50 uppercase tracking-widest text-xs block mb-2 font-bold text-blue-300">Prop</span><span class="text-blue-100">${state.motions.prop}</span></div>`);
+        if (state.motions.opp.trim() !== '') allMotions.push(`<div class="flex-1 border-l border-slate-700 pl-8"><span class="opacity-50 uppercase tracking-widest text-xs block mb-2 font-bold text-red-300">Opp</span><span class="text-red-100">${state.motions.opp}</span></div>`);
         if (allMotions.length > 0) {
             motionHtml = `<div class="flex gap-8 text-lg mt-6 max-w-6xl text-left bg-slate-900/60 p-6 rounded-3xl border border-slate-800 shadow-xl">${allMotions.join('')}</div>`;
         }
@@ -356,12 +354,12 @@ function buildControllerHTML() {
                     <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm space-y-3">
                         <h2 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2 border-b pb-2">Debate Setup</h2>
                         <div>
-                            <label class="text-[10px] uppercase text-gray-400 font-bold block mb-1">Pro Motion (Optional)</label>
-                            <input type="text" value="${state.motions.pro}" oninput="Actions.updateMotion('pro', event.target.value)" class="w-full text-sm bg-gray-50 border border-gray-200 rounded p-2 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-medium" placeholder="Enter Pro stance...">
+                            <label class="text-[10px] uppercase text-gray-400 font-bold block mb-1">Prop Motion (Optional)</label>
+                            <input type="text" value="${state.motions.prop}" oninput="Actions.updateMotion('prop', event.target.value)" class="w-full text-sm bg-gray-50 border border-gray-200 rounded p-2 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-medium" placeholder="Enter Prop stance...">
                         </div>
                         <div>
-                            <label class="text-[10px] uppercase text-gray-400 font-bold block mb-1">Con Motion (Optional)</label>
-                            <input type="text" value="${state.motions.con}" oninput="Actions.updateMotion('con', event.target.value)" class="w-full text-sm bg-gray-50 border border-gray-200 rounded p-2 outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500 transition-all font-medium" placeholder="Enter Con stance...">
+                            <label class="text-[10px] uppercase text-gray-400 font-bold block mb-1">Opp Motion (Optional)</label>
+                            <input type="text" value="${state.motions.opp}" oninput="Actions.updateMotion('opp', event.target.value)" class="w-full text-sm bg-gray-50 border border-gray-200 rounded p-2 outline-none focus:border-red-500 focus:ring-1 focus:ring-red-500 transition-all font-medium" placeholder="Enter Opp stance...">
                         </div>
                     </div>
 
@@ -391,12 +389,12 @@ function buildControllerHTML() {
                         ${isCrossfire ? `
                             <div class="flex gap-6 w-full mb-8">
                                 <div class="flex-1 g2-curve bg-gray-50 border-2 border-blue-100 py-8 px-4 flex flex-col items-center">
-                                    <div class="text-xs font-bold text-blue-400 tracking-widest uppercase mb-4">Pro Side</div>
+                                    <div class="text-xs font-bold text-blue-400 tracking-widest uppercase mb-4">Prop Side</div>
                                     <div id="ctrl-main-time" class="font-display text-7xl font-bold text-blue-600 mb-6 ${state.remaining <= 30 && state.remaining > 0 ? 'text-red-600' : ''} ${state.isDone ? 'opacity-30' : ''}">
                                         ${formatTime(state.remaining)}
                                     </div>
                                     <button id="ctrl-btn-toggle" onclick="Actions.toggleTimer('main')" class="w-full ${state.isRunning ? 'bg-amber-500 hover:bg-amber-400' : 'bg-blue-600 hover:bg-blue-500'} text-white py-4 rounded-2xl text-lg font-bold shadow-md transition-colors mb-4">
-                                        ${state.isRunning ? 'PAUSE PRO (1)' : 'START PRO (1)'}
+                                        ${state.isRunning ? 'PAUSE PROP (1)' : 'START PROP (1)'}
                                     </button>
                                     <div class="flex gap-2 w-full">
                                         <button onclick="Actions.adjustTime(-10, 'main')" class="flex-1 py-2 text-sm text-gray-500 bg-white hover:bg-gray-100 rounded-xl border border-gray-200 font-bold">-10s</button>
@@ -404,12 +402,12 @@ function buildControllerHTML() {
                                     </div>
                                 </div>
                                 <div class="flex-1 g2-curve bg-gray-50 border-2 border-red-100 py-8 px-4 flex flex-col items-center">
-                                    <div class="text-xs font-bold text-red-400 tracking-widest uppercase mb-4">Con Side</div>
+                                    <div class="text-xs font-bold text-red-400 tracking-widest uppercase mb-4">Opp Side</div>
                                     <div id="ctrl-sec-time" class="font-display text-7xl font-bold text-red-600 mb-6 ${state.secondaryRemaining <= 30 && state.secondaryRemaining > 0 ? 'text-red-600' : ''} ${state.secondaryIsDone ? 'opacity-30' : ''}">
                                         ${formatTime(state.secondaryRemaining)}
                                     </div>
                                     <button id="ctrl-btn-toggle-sec" onclick="Actions.toggleTimer('sec')" class="w-full ${state.secondaryIsRunning ? 'bg-amber-500 hover:bg-amber-400' : 'bg-red-600 hover:bg-red-500'} text-white py-4 rounded-2xl text-lg font-bold shadow-md transition-colors mb-4">
-                                        ${state.secondaryIsRunning ? 'PAUSE CON (2)' : 'START CON (2)'}
+                                        ${state.secondaryIsRunning ? 'PAUSE OPP (2)' : 'START OPP (2)'}
                                     </button>
                                     <div class="flex gap-2 w-full">
                                         <button onclick="Actions.adjustTime(-10, 'sec')" class="flex-1 py-2 text-sm text-gray-500 bg-white hover:bg-gray-100 rounded-xl border border-gray-200 font-bold">-10s</button>
@@ -453,7 +451,7 @@ function buildControllerHTML() {
                     
                     <div class="absolute bottom-6 text-xs text-gray-400 text-center w-full font-bold tracking-wide">
                         ${isCrossfire 
-                            ? 'SHORTCUTS: [1] TOGGLE PRO • [2] TOGGLE CON • [ENTER] NEXT • [R] RESET' 
+                            ? 'SHORTCUTS: [1] TOGGLE PROP • [2] TOGGLE OPP • [ENTER] NEXT • [R] RESET' 
                             : 'SHORTCUTS: [SPACE] PLAY/PAUSE • [ENTER] NEXT • [R] RESET'}
                     </div>
                 </div>
@@ -488,7 +486,7 @@ function syncUI() {
         const btnToggle = document.getElementById('ctrl-btn-toggle');
         if (btnToggle) {
             if (isCrossfire) {
-                btnToggle.innerText = state.isRunning ? 'PAUSE PRO (1)' : 'START PRO (1)';
+                btnToggle.innerText = state.isRunning ? 'PAUSE PROP (1)' : 'START PROP (1)';
                 btnToggle.className = `w-full ${state.isRunning ? 'bg-amber-500 hover:bg-amber-400' : 'bg-blue-600 hover:bg-blue-500'} text-white py-4 rounded-2xl text-lg font-bold shadow-md transition-colors mb-4`;
             } else {
                 btnToggle.innerText = state.isRunning ? 'PAUSE (Space)' : 'START (Space)';
@@ -504,7 +502,7 @@ function syncUI() {
             }
             const btnToggleSec = document.getElementById('ctrl-btn-toggle-sec');
             if (btnToggleSec) {
-                btnToggleSec.innerText = state.secondaryIsRunning ? 'PAUSE CON (2)' : 'START CON (2)';
+                btnToggleSec.innerText = state.secondaryIsRunning ? 'PAUSE OPP (2)' : 'START OPP (2)';
                 btnToggleSec.className = `w-full ${state.secondaryIsRunning ? 'bg-amber-500 hover:bg-amber-400' : 'bg-red-600 hover:bg-red-500'} text-white py-4 rounded-2xl text-lg font-bold shadow-md transition-colors mb-4`;
             }
         }
