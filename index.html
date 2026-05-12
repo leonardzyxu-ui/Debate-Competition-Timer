@@ -16,8 +16,8 @@
         .clash-bg {
             background-color: #020617;
             background-image: 
-                radial-gradient(circle at 0% 50%, rgba(59, 130, 246, 0.35), transparent 55%), /* Blue from this try */
-                radial-gradient(circle at 100% 50%, rgba(239, 68, 68, 0.5), transparent 55%); /* Red from last try */
+                radial-gradient(circle at 0% 50%, rgba(59, 130, 246, 0.35), transparent 55%), /* Blue */
+                radial-gradient(circle at 100% 50%, rgba(239, 68, 68, 0.5), transparent 55%); /* Red */
         }
 
         /* Custom Crossfire Glow & Gradient Border */
@@ -55,7 +55,7 @@ const DEFAULT_TIMELINE = [
     { id: 'c-con', name: "Constructive", speaker: "1st Speaker (Con)", seconds: 180, side: 'con' },
     { id: 'r-pro', name: "Rebuttal", speaker: "2nd Speaker (Pro)", seconds: 180, side: 'pro' },
     { id: 'r-con', name: "Rebuttal", speaker: "2nd Speaker (Con)", seconds: 180, side: 'con' },
-    { id: 'cf',    name: "Crossfire", speaker: "All Speakers", seconds: 480, side: 'all' },
+    { id: 'cf',    name: "Crossfire", speaker: "All Speakers", seconds: 180, side: 'all' }, // Set base time for both sides
     { id: 's-pro', name: "Summary", speaker: "3rd Speaker (Pro)", seconds: 180, side: 'pro' },
     { id: 's-con', name: "Summary", speaker: "3rd Speaker (Con)", seconds: 180, side: 'con' }
 ];
@@ -64,8 +64,11 @@ let state = {
     timeline: JSON.parse(JSON.stringify(DEFAULT_TIMELINE)),
     currentIndex: 0,
     remaining: DEFAULT_TIMELINE[0].seconds,
+    secondaryRemaining: DEFAULT_TIMELINE[0].seconds,
     isRunning: false,
+    secondaryIsRunning: false,
     isDone: false,
+    secondaryIsDone: false,
     motions: { pro: '', con: '' }
 };
 
@@ -101,9 +104,10 @@ function broadcastState() {
     syncUI();
 }
 
-function triggerTickAnimation() {
-    const timeEls = [document.getElementById('stage-main-time'), document.getElementById('ctrl-main-time')];
-    timeEls.forEach(el => {
+function triggerTickAnimation(target = 'main') {
+    const ids = target === 'main' ? ['stage-main-time', 'ctrl-main-time'] : ['stage-sec-time', 'ctrl-sec-time'];
+    ids.forEach(id => {
+        const el = document.getElementById(id);
         if (!el) return;
         el.classList.remove('pulse-rest');
         el.classList.add('pulse-tick');
@@ -114,16 +118,41 @@ function triggerTickAnimation() {
     });
 }
 
-function tick() {
-    if (state.remaining > 0) {
-        state.remaining--;
-        triggerTickAnimation();
+function checkInterval() {
+    if (state.isRunning || state.secondaryIsRunning) {
+        if (!timerInterval) timerInterval = setInterval(tick, 1000);
     } else {
+        clearInterval(timerInterval);
+        timerInterval = null;
+    }
+}
+
+function tick() {
+    let tickedMain = false;
+    let tickedSec = false;
+
+    if (state.isRunning && state.remaining > 0) {
+        state.remaining--;
+        tickedMain = true;
+    } else if (state.isRunning && state.remaining === 0) {
         state.isRunning = false;
         state.isDone = true;
-        clearInterval(timerInterval);
         if (!isStageMode) beep();
     }
+
+    if (state.secondaryIsRunning && state.secondaryRemaining > 0) {
+        state.secondaryRemaining--;
+        tickedSec = true;
+    } else if (state.secondaryIsRunning && state.secondaryRemaining === 0) {
+        state.secondaryIsRunning = false;
+        state.secondaryIsDone = true;
+        if (!isStageMode) beep();
+    }
+
+    if (tickedMain) triggerTickAnimation('main');
+    if (tickedSec) triggerTickAnimation('sec');
+    
+    checkInterval();
     broadcastState();
 }
 
@@ -137,34 +166,48 @@ function toggleFullscreen() {
 
 // --- Controller Actions ---
 const Actions = {
-    toggleTimer: () => {
-        if (state.isDone) return;
-        state.isRunning = !state.isRunning;
-        if (state.isRunning) {
-            timerInterval = setInterval(tick, 1000);
+    toggleTimer: (target = 'main') => {
+        if (target === 'main') {
+            if (state.isDone) return;
+            state.isRunning = !state.isRunning;
         } else {
-            clearInterval(timerInterval);
+            if (state.secondaryIsDone) return;
+            state.secondaryIsRunning = !state.secondaryIsRunning;
         }
+        checkInterval();
         broadcastState();
     },
     resetTimer: () => {
-        clearInterval(timerInterval);
+        const sec = state.timeline[state.currentIndex].seconds;
+        state.remaining = sec;
+        state.secondaryRemaining = sec;
         state.isRunning = false;
+        state.secondaryIsRunning = false;
         state.isDone = false;
-        state.remaining = state.timeline[state.currentIndex].seconds;
+        state.secondaryIsDone = false;
+        checkInterval();
         broadcastState();
     },
-    adjustTime: (amount) => {
-        state.remaining = Math.max(0, state.remaining + amount);
-        if (state.remaining > 0 && state.isDone) state.isDone = false;
+    adjustTime: (amount, target = 'main') => {
+        if (target === 'main') {
+            state.remaining = Math.max(0, state.remaining + amount);
+            if (state.remaining > 0 && state.isDone) state.isDone = false;
+        } else {
+            state.secondaryRemaining = Math.max(0, state.secondaryRemaining + amount);
+            if (state.secondaryRemaining > 0 && state.secondaryIsDone) state.secondaryIsDone = false;
+        }
         broadcastState();
     },
     jumpTo: (index) => {
-        clearInterval(timerInterval);
         state.currentIndex = index;
+        const sec = state.timeline[index].seconds;
+        state.remaining = sec;
+        state.secondaryRemaining = sec;
         state.isRunning = false;
+        state.secondaryIsRunning = false;
         state.isDone = false;
-        state.remaining = state.timeline[index].seconds;
+        state.secondaryIsDone = false;
+        checkInterval();
         broadcastState();
     },
     nextSegment: () => {
@@ -194,17 +237,21 @@ const Actions = {
 // --- View Rendering ---
 function buildStageHTML() {
     const current = state.timeline[state.currentIndex];
-    const isWarning = state.remaining <= 30 && state.remaining > 0;
+    const isCrossfire = current.side === 'all';
     
-    // G2 Curve Timer Box Styling - Amplified Glow & Crossfire Custom Class
+    // Warning state handles both timers in Crossfire
+    const isWarning = isCrossfire 
+        ? ((state.remaining <= 30 && state.remaining > 0) || (state.secondaryRemaining <= 30 && state.secondaryRemaining > 0))
+        : (state.remaining <= 30 && state.remaining > 0);
+    
     let glowClass = ''; 
-    if (state.isDone) glowClass = 'shadow-none border-slate-900 bg-slate-950/50 text-slate-600';
+    if (state.isDone && (!isCrossfire || state.secondaryIsDone)) glowClass = 'shadow-none border-slate-900 bg-slate-950/50 text-slate-600';
     else if (isWarning) glowClass = 'stage-warning bg-slate-900/80 border-red-500';
     else if (current.side === 'pro') glowClass = 'shadow-[0_0_120px_rgba(59,130,246,0.35)] border-blue-500 bg-slate-900/80';
     else if (current.side === 'con') glowClass = 'shadow-[0_0_120px_rgba(239,68,68,0.35)] border-red-500 bg-slate-900/80';
-    else glowClass = 'crossfire-glow';
+    else glowClass = 'crossfire-glow bg-slate-900/80';
 
-    // Current Speaker Styling & Halo
+    // Speaker Styling & Halo
     let speakerColorClass = '';
     let speakerHaloClass = '';
     
@@ -215,12 +262,10 @@ function buildStageHTML() {
         speakerColorClass = 'text-red-400';
         speakerHaloClass = 'drop-shadow-[0_0_20px_rgba(248,113,113,0.8)]';
     } else {
-        // Aligned gradient to background: Blue on Left, Red on Right
         speakerColorClass = 'bg-gradient-to-r from-blue-400 to-red-400 text-transparent bg-clip-text';
         speakerHaloClass = 'drop-shadow-[0_0_20px_rgba(168,85,247,0.6)]';
     }
 
-    // Motion Logic
     let motionHtml = '';
     if (current.side === 'pro' && state.motions.pro.trim() !== '') {
         motionHtml = `<div class="text-xl text-blue-200 mt-4 max-w-4xl text-center font-medium"><span class="opacity-50 uppercase tracking-widest text-xs block mb-2 font-bold text-slate-300">Motion (Pro)</span> ${state.motions.pro}</div>`;
@@ -237,18 +282,30 @@ function buildStageHTML() {
 
     return `
         <div class="flex flex-col h-screen w-screen clash-bg overflow-hidden text-white font-sans">
-            
             <div class="flex-1 w-full flex flex-col items-center justify-between relative box-border py-12 px-12 z-10">
-                
                 <div class="text-center text-slate-400 tracking-[0.3em] uppercase text-xl font-bold drop-shadow-md">
                     ${current.name}
                 </div>
                 
                 <div class="flex-1 flex items-center justify-center w-full">
-                    <div class="g2-curve border-2 transition-all duration-700 px-24 py-16 flex items-center justify-center min-w-[600px] ${glowClass} backdrop-blur-sm">
-                        <div id="stage-main-time" class="font-display text-[11rem] leading-none font-bold drop-shadow-2xl inline-block transition-colors duration-300 ${isWarning ? 'text-red-400' : 'text-white'} ${state.isDone ? 'opacity-30' : ''}">
-                            ${formatTime(state.remaining)}
-                        </div>
+                    <div class="g2-curve border-2 transition-all duration-700 px-16 py-16 flex items-center justify-center ${isCrossfire ? 'w-full max-w-5xl' : 'min-w-[600px]'} ${glowClass} backdrop-blur-sm">
+                        
+                        ${isCrossfire ? `
+                            <div class="flex w-full items-center justify-between px-10">
+                                <div id="stage-main-time" class="font-display text-[10rem] leading-none font-bold text-blue-400 drop-shadow-2xl transition-colors duration-300 ${state.remaining <= 30 && state.remaining > 0 ? 'text-red-500' : ''} ${state.isDone ? 'opacity-30' : ''}">
+                                    ${formatTime(state.remaining)}
+                                </div>
+                                <div class="w-1 h-32 bg-slate-700/50 rounded-full mx-8"></div>
+                                <div id="stage-sec-time" class="font-display text-[10rem] leading-none font-bold text-red-400 drop-shadow-2xl transition-colors duration-300 ${state.secondaryRemaining <= 30 && state.secondaryRemaining > 0 ? 'text-red-500' : ''} ${state.secondaryIsDone ? 'opacity-30' : ''}">
+                                    ${formatTime(state.secondaryRemaining)}
+                                </div>
+                            </div>
+                        ` : `
+                            <div id="stage-main-time" class="font-display text-[11rem] leading-none font-bold drop-shadow-2xl inline-block transition-colors duration-300 ${isWarning ? 'text-red-400' : 'text-white'} ${state.isDone ? 'opacity-30' : ''}">
+                                ${formatTime(state.remaining)}
+                            </div>
+                        `}
+
                     </div>
                 </div>
 
@@ -267,44 +324,35 @@ function buildStageHTML() {
                         : idx < state.currentIndex 
                             ? 'opacity-30 text-slate-300' 
                             : 'opacity-60 hover:opacity-80 text-slate-300';
-                    
                     return `
                     <div class="transition-all duration-500 transform origin-bottom flex flex-col items-center justify-center cursor-default ${tlOpacity}">
                         <div class="text-[11px] uppercase tracking-[0.25em] text-slate-400 mb-2 font-bold whitespace-nowrap">${seg.name}</div>
                         <div class="text-xl font-bold tracking-wider whitespace-nowrap">${seg.speaker}</div>
-                    </div>
-                    `;
+                    </div>`;
                 }).join('')}
             </div>
 
-            <button id="stage-fs-btn" onclick="toggleFullscreen()" class="absolute bottom-40 right-6 p-4 text-white bg-white/5 hover:bg-white/10 rounded-full transition-opacity duration-500 opacity-0 z-50 cursor-pointer border border-white/10 backdrop-blur-sm">
-                ⛶
-            </button>
+            <button id="stage-fs-btn" onclick="toggleFullscreen()" class="absolute bottom-40 right-6 p-4 text-white bg-white/5 hover:bg-white/10 rounded-full transition-opacity duration-500 opacity-0 z-50 cursor-pointer border border-white/10 backdrop-blur-sm">⛶</button>
         </div>
     `;
 }
 
 function buildControllerHTML() {
     const current = state.timeline[state.currentIndex];
+    const isCrossfire = current.side === 'all';
     
     return `
         <div class="h-full flex flex-col bg-white">
             <div class="flex justify-between items-center px-6 py-4 bg-gray-900 text-white shadow-md z-10">
                 <div class="font-bold tracking-wider uppercase text-sm">Voices Unbounded | Operator</div>
                 <div class="flex items-center gap-4">
-                    <button onclick="toggleFullscreen()" class="text-gray-400 hover:text-white text-sm font-medium transition-colors">
-                        ⛶ Fullscreen
-                    </button>
-                    <button onclick="Actions.launchStage()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-sm font-semibold transition-colors shadow-lg">
-                        📺 Launch Stage Display
-                    </button>
+                    <button onclick="toggleFullscreen()" class="text-gray-400 hover:text-white text-sm font-medium transition-colors">⛶ Fullscreen</button>
+                    <button onclick="Actions.launchStage()" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded text-sm font-semibold transition-colors shadow-lg">📺 Launch Stage Display</button>
                 </div>
             </div>
 
             <div class="flex flex-1 overflow-hidden">
-                
                 <div class="w-1/3 bg-gray-50 border-r border-gray-200 overflow-y-auto p-6 space-y-6 pb-20">
-                    
                     <div class="bg-white p-4 rounded-xl border border-gray-200 shadow-sm space-y-3">
                         <h2 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-2 border-b pb-2">Debate Setup</h2>
                         <div>
@@ -330,51 +378,83 @@ function buildControllerHTML() {
                                         ${state.currentIndex === idx ? formatTime(state.remaining) : formatTime(seg.seconds)}
                                     </span>
                                 </div>
-                                <input type="text" 
-                                    value="${seg.speaker}" 
-                                    oninput="Actions.updateSpeaker(event, ${idx})"
-                                    class="w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 outline-none text-sm font-semibold text-gray-800 transition-colors pb-1"
-                                />
+                                <input type="text" value="${seg.speaker}" oninput="Actions.updateSpeaker(event, ${idx})" class="w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-blue-500 outline-none text-sm font-semibold text-gray-800 transition-colors pb-1" />
                             </div>
                         `).join('')}
                     </div>
                 </div>
 
                 <div class="flex-1 flex flex-col items-center justify-center p-8 bg-gray-100 relative">
-                    <div class="bg-white rounded-[40px] shadow-xl p-12 w-full max-w-2xl flex flex-col items-center border border-gray-200">
-                        
+                    <div class="bg-white rounded-[40px] shadow-xl p-12 w-full max-w-3xl flex flex-col items-center border border-gray-200">
                         <div class="text-sm tracking-widest text-gray-400 uppercase font-bold mb-8">${current.name}</div>
                         
-                        <div class="g2-curve bg-gray-50 border-2 border-gray-100 py-10 px-6 mb-8 flex justify-center min-w-[400px] w-full">
-                            <div id="ctrl-main-time" class="font-display text-8xl font-bold inline-block transition-colors duration-300 ${state.remaining <= 30 && !state.isDone && state.remaining > 0 ? 'text-red-600' : 'text-gray-900'} ${state.isDone ? 'opacity-30' : ''}">
-                                ${formatTime(state.remaining)}
+                        ${isCrossfire ? `
+                            <div class="flex gap-6 w-full mb-8">
+                                <div class="flex-1 g2-curve bg-gray-50 border-2 border-blue-100 py-8 px-4 flex flex-col items-center">
+                                    <div class="text-xs font-bold text-blue-400 tracking-widest uppercase mb-4">Pro Side</div>
+                                    <div id="ctrl-main-time" class="font-display text-7xl font-bold text-blue-600 mb-6 ${state.remaining <= 30 && state.remaining > 0 ? 'text-red-600' : ''} ${state.isDone ? 'opacity-30' : ''}">
+                                        ${formatTime(state.remaining)}
+                                    </div>
+                                    <button id="ctrl-btn-toggle" onclick="Actions.toggleTimer('main')" class="w-full ${state.isRunning ? 'bg-amber-500 hover:bg-amber-400' : 'bg-blue-600 hover:bg-blue-500'} text-white py-4 rounded-2xl text-lg font-bold shadow-md transition-colors mb-4">
+                                        ${state.isRunning ? 'PAUSE PRO (1)' : 'START PRO (1)'}
+                                    </button>
+                                    <div class="flex gap-2 w-full">
+                                        <button onclick="Actions.adjustTime(-10, 'main')" class="flex-1 py-2 text-sm text-gray-500 bg-white hover:bg-gray-100 rounded-xl border border-gray-200 font-bold">-10s</button>
+                                        <button onclick="Actions.adjustTime(10, 'main')" class="flex-1 py-2 text-sm text-gray-500 bg-white hover:bg-gray-100 rounded-xl border border-gray-200 font-bold">+10s</button>
+                                    </div>
+                                </div>
+                                <div class="flex-1 g2-curve bg-gray-50 border-2 border-red-100 py-8 px-4 flex flex-col items-center">
+                                    <div class="text-xs font-bold text-red-400 tracking-widest uppercase mb-4">Con Side</div>
+                                    <div id="ctrl-sec-time" class="font-display text-7xl font-bold text-red-600 mb-6 ${state.secondaryRemaining <= 30 && state.secondaryRemaining > 0 ? 'text-red-600' : ''} ${state.secondaryIsDone ? 'opacity-30' : ''}">
+                                        ${formatTime(state.secondaryRemaining)}
+                                    </div>
+                                    <button id="ctrl-btn-toggle-sec" onclick="Actions.toggleTimer('sec')" class="w-full ${state.secondaryIsRunning ? 'bg-amber-500 hover:bg-amber-400' : 'bg-red-600 hover:bg-red-500'} text-white py-4 rounded-2xl text-lg font-bold shadow-md transition-colors mb-4">
+                                        ${state.secondaryIsRunning ? 'PAUSE CON (2)' : 'START CON (2)'}
+                                    </button>
+                                    <div class="flex gap-2 w-full">
+                                        <button onclick="Actions.adjustTime(-10, 'sec')" class="flex-1 py-2 text-sm text-gray-500 bg-white hover:bg-gray-100 rounded-xl border border-gray-200 font-bold">-10s</button>
+                                        <button onclick="Actions.adjustTime(10, 'sec')" class="flex-1 py-2 text-sm text-gray-500 bg-white hover:bg-gray-100 rounded-xl border border-gray-200 font-bold">+10s</button>
+                                    </div>
+                                </div>
                             </div>
-                        </div>
-
-                        <div class="w-full">
-                            <div class="text-3xl font-bold text-gray-800 mb-8 text-center" id="ctrl-main-speaker">${current.speaker}</div>
-                            
-                            <div class="flex justify-center gap-4 mb-8">
-                                <button id="ctrl-btn-toggle" onclick="Actions.toggleTimer()" class="flex-1 ${state.isRunning ? 'bg-amber-500 hover:bg-amber-400' : 'bg-green-600 hover:bg-green-500'} text-white py-5 rounded-2xl text-xl font-bold shadow-md transition-colors">
-                                    ${state.isRunning ? 'PAUSE (Space)' : 'START (Space)'}
+                            <div class="w-full flex justify-center mb-6">
+                                <button onclick="Actions.resetTimer()" class="px-12 bg-gray-200 hover:bg-gray-300 text-gray-700 py-4 rounded-2xl text-lg font-bold shadow-sm transition-colors">
+                                    Reset Both (R)
                                 </button>
-                                <button onclick="Actions.resetTimer()" class="w-1/4 bg-gray-200 hover:bg-gray-300 text-gray-700 py-5 rounded-2xl text-lg font-bold shadow-sm transition-colors">
-                                    Reset (R)
-                                </button>
                             </div>
+                        ` : `
+                            <div class="g2-curve bg-gray-50 border-2 border-gray-100 py-10 px-6 mb-8 flex justify-center min-w-[400px] w-full">
+                                <div id="ctrl-main-time" class="font-display text-8xl font-bold inline-block transition-colors duration-300 ${state.remaining <= 30 && !state.isDone && state.remaining > 0 ? 'text-red-600' : 'text-gray-900'} ${state.isDone ? 'opacity-30' : ''}">
+                                    ${formatTime(state.remaining)}
+                                </div>
+                            </div>
+                            <div class="w-full">
+                                <div class="text-3xl font-bold text-gray-800 mb-8 text-center" id="ctrl-main-speaker">${current.speaker}</div>
+                                <div class="flex justify-center gap-4 mb-8">
+                                    <button id="ctrl-btn-toggle" onclick="Actions.toggleTimer('main')" class="flex-1 ${state.isRunning ? 'bg-amber-500 hover:bg-amber-400' : 'bg-green-600 hover:bg-green-500'} text-white py-5 rounded-2xl text-xl font-bold shadow-md transition-colors">
+                                        ${state.isRunning ? 'PAUSE (Space)' : 'START (Space)'}
+                                    </button>
+                                    <button onclick="Actions.resetTimer()" class="w-1/4 bg-gray-200 hover:bg-gray-300 text-gray-700 py-5 rounded-2xl text-lg font-bold shadow-sm transition-colors">
+                                        Reset (R)
+                                    </button>
+                                </div>
+                                <div class="flex justify-center gap-4 pt-6 border-t border-gray-100">
+                                    <button onclick="Actions.adjustTime(-10, 'main')" class="px-5 py-3 text-sm text-gray-500 hover:bg-gray-100 rounded-xl border border-gray-200 font-bold">-10s</button>
+                                    <button onclick="Actions.adjustTime(10, 'main')" class="px-5 py-3 text-sm text-gray-500 hover:bg-gray-100 rounded-xl border border-gray-200 font-bold">+10s</button>
+                                </div>
+                            </div>
+                        `}
 
-                            <div class="flex justify-center gap-4 pt-6 border-t border-gray-100">
-                                <button onclick="Actions.adjustTime(-10)" class="px-5 py-3 text-sm text-gray-500 hover:bg-gray-100 rounded-xl border border-gray-200 font-bold">-10s</button>
-                                <button onclick="Actions.adjustTime(10)" class="px-5 py-3 text-sm text-gray-500 hover:bg-gray-100 rounded-xl border border-gray-200 font-bold">+10s</button>
-                                <div class="flex-1"></div>
-                                <button onclick="Actions.prevSegment()" class="px-6 py-3 text-sm text-gray-600 hover:bg-gray-100 rounded-xl font-bold transition-colors">Prev</button>
-                                <button onclick="Actions.nextSegment()" class="px-6 py-3 text-sm text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl font-bold shadow-sm transition-colors">Next (Enter)</button>
-                            </div>
+                        <div class="flex justify-between w-full pt-6 border-t border-gray-100 mt-2">
+                            <button onclick="Actions.prevSegment()" class="px-6 py-3 text-sm text-gray-600 hover:bg-gray-100 rounded-xl font-bold transition-colors">Prev Segment</button>
+                            <button onclick="Actions.nextSegment()" class="px-6 py-3 text-sm text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl font-bold shadow-sm transition-colors">Next Segment (Enter)</button>
                         </div>
-
                     </div>
+                    
                     <div class="absolute bottom-6 text-xs text-gray-400 text-center w-full font-bold tracking-wide">
-                        KEYBOARD SHORTCUTS: [SPACE] PLAY/PAUSE • [ENTER] NEXT SPEAKER • [R] RESET
+                        ${isCrossfire 
+                            ? 'SHORTCUTS: [1] TOGGLE PRO • [2] TOGGLE CON • [ENTER] NEXT • [R] RESET' 
+                            : 'SHORTCUTS: [SPACE] PLAY/PAUSE • [ENTER] NEXT • [R] RESET'}
                     </div>
                 </div>
             </div>
@@ -393,16 +473,40 @@ function syncUI() {
         document.getElementById('app').innerHTML = buildControllerHTML();
         lastRenderedIndex = state.currentIndex;
     } else {
+        const isCrossfire = state.timeline[state.currentIndex].side === 'all';
+        
         const timeEl = document.getElementById('ctrl-main-time');
         if (timeEl) {
             timeEl.innerText = formatTime(state.remaining);
-            timeEl.className = `font-display text-8xl font-bold inline-block transition-colors duration-300 ${state.remaining <= 30 && !state.isDone && state.remaining > 0 ? 'text-red-600' : 'text-gray-900'} ${state.isDone ? 'opacity-30' : ''}`;
+            if (isCrossfire) {
+                timeEl.className = `font-display text-7xl font-bold text-blue-600 mb-6 ${state.remaining <= 30 && !state.isDone && state.remaining > 0 ? 'text-red-600' : ''} ${state.isDone ? 'opacity-30' : ''}`;
+            } else {
+                timeEl.className = `font-display text-8xl font-bold inline-block transition-colors duration-300 ${state.remaining <= 30 && !state.isDone && state.remaining > 0 ? 'text-red-600' : 'text-gray-900'} ${state.isDone ? 'opacity-30' : ''}`;
+            }
         }
         
         const btnToggle = document.getElementById('ctrl-btn-toggle');
         if (btnToggle) {
-            btnToggle.innerText = state.isRunning ? 'PAUSE (Space)' : 'START (Space)';
-            btnToggle.className = `flex-1 ${state.isRunning ? 'bg-amber-500 hover:bg-amber-400' : 'bg-green-600 hover:bg-green-500'} text-white py-5 rounded-2xl text-xl font-bold shadow-md transition-colors`;
+            if (isCrossfire) {
+                btnToggle.innerText = state.isRunning ? 'PAUSE PRO (1)' : 'START PRO (1)';
+                btnToggle.className = `w-full ${state.isRunning ? 'bg-amber-500 hover:bg-amber-400' : 'bg-blue-600 hover:bg-blue-500'} text-white py-4 rounded-2xl text-lg font-bold shadow-md transition-colors mb-4`;
+            } else {
+                btnToggle.innerText = state.isRunning ? 'PAUSE (Space)' : 'START (Space)';
+                btnToggle.className = `flex-1 ${state.isRunning ? 'bg-amber-500 hover:bg-amber-400' : 'bg-green-600 hover:bg-green-500'} text-white py-5 rounded-2xl text-xl font-bold shadow-md transition-colors`;
+            }
+        }
+        
+        if (isCrossfire) {
+            const timeSecEl = document.getElementById('ctrl-sec-time');
+            if (timeSecEl) {
+                timeSecEl.innerText = formatTime(state.secondaryRemaining);
+                timeSecEl.className = `font-display text-7xl font-bold text-red-600 mb-6 ${state.secondaryRemaining <= 30 && !state.secondaryIsDone && state.secondaryRemaining > 0 ? 'text-red-600' : ''} ${state.secondaryIsDone ? 'opacity-30' : ''}`;
+            }
+            const btnToggleSec = document.getElementById('ctrl-btn-toggle-sec');
+            if (btnToggleSec) {
+                btnToggleSec.innerText = state.secondaryIsRunning ? 'PAUSE CON (2)' : 'START CON (2)';
+                btnToggleSec.className = `w-full ${state.secondaryIsRunning ? 'bg-amber-500 hover:bg-amber-400' : 'bg-red-600 hover:bg-red-500'} text-white py-4 rounded-2xl text-lg font-bold shadow-md transition-colors mb-4`;
+            }
         }
         
         const tlTimeEl = document.getElementById(`tl-time-${state.currentIndex}`);
@@ -421,10 +525,17 @@ channel.onmessage = (e) => {
 if (!isStageMode) {
     window.addEventListener('keydown', (e) => {
         if (e.target.tagName === 'INPUT') return;
+        const isCrossfire = state.timeline[state.currentIndex].side === 'all';
         
-        if (e.code === 'Space') {
+        if (e.code === 'Space' && !isCrossfire) {
             e.preventDefault();
-            Actions.toggleTimer();
+            Actions.toggleTimer('main');
+        } else if (e.code === 'Digit1' && isCrossfire) {
+            e.preventDefault();
+            Actions.toggleTimer('main');
+        } else if (e.code === 'Digit2' && isCrossfire) {
+            e.preventDefault();
+            Actions.toggleTimer('sec');
         } else if (e.code === 'Enter') {
             e.preventDefault();
             Actions.nextSegment();
